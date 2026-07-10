@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ふりがな付き Word 文書 生成ツール</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500;600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/build/kuromoji.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root{
+    --paper:      #ECE6D6;
+    --paper-deep: #E2DAC5;
+    --ink:        #26221D;
+    --ink-soft:   #55504A;
+    --ai:         #2B4570;   /* 藍色 */
+    --ai-deep:    #1C2E4A;
+    --shu:        #B7410E;   /* 朱色 */
+    --shu-soft:   #C96A3E;
+    --line:       rgba(38,34,29,0.14);
+    --line-soft:  rgba(38,34,29,0.08);
+    --card:       #F5F1E6;
+    --shadow:     0 2px 0 rgba(38,34,29,0.06), 0 10px 24px rgba(38,34,29,0.10);
+  }
+
+  *{ box-sizing:border-box; }
+
+  body{
+    margin:0;
+    background:
+      radial-gradient(circle at 15% -10%, rgba(43,69,112,0.06), transparent 45%),
+      radial-gradient(circle at 100% 0%, rgba(183,65,14,0.05), transparent 40%),
+      var(--paper);
+    color:var(--ink);
+    font-family:"Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
+    min-height:100vh;
+  }
+
+  .page{
+    max-width:920px;
+    margin:0 auto;
+    padding:56px 24px 96px;
+  }
+
+  /* ── ヘッダー：判・落款風の見出し ───────────────────── */
+  header{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:24px;
+    border-bottom:2px solid var(--ink);
+    padding-bottom:20px;
+    margin-bottom:36px;
+  }
+  .title-block h1{
+    font-family:"Shippori Mincho", serif;
+    font-weight:700;
+    font-size:clamp(28px, 4vw, 40px);
+    margin:0 0 6px;
+    letter-spacing:.04em;
+    line-height:1.3;
+  }
+  .title-block h1 .ruby-accent{
+    color:var(--shu);
+  }
+  .title-block p{
+    margin:0;
+    color:var(--ink-soft);
+    font-size:13.5px;
+    letter-spacing:.02em;
+  }
+  .seal{
+    flex:none;
+    width:56px; height:56px;
+    border:2.5px solid var(--shu);
+    color:var(--shu);
+    border-radius:6px;
+    display:flex; align-items:center; justify-content:center;
+    font-family:"Shippori Mincho", serif;
+    font-size:13px;
+    font-weight:700;
+    writing-mode:vertical-rl;
+    letter-spacing:.15em;
+    transform:rotate(0.5deg);
+    opacity:.9;
+  }
+
+  /* ── 辞書ロード状態バー ───────────────────────────── */
+  #dict-status{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-size:13px;
+    color:var(--ink-soft);
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:10px 14px;
+    margin-bottom:28px;
+  }
+  #dict-status .dot{
+    width:8px; height:8px; border-radius:50%;
+    background:var(--shu-soft);
+    flex:none;
+    animation:pulse 1.2s ease-in-out infinite;
+  }
+  #dict-status.ready .dot{ background:#3F7D51; animation:none; }
+  #dict-status.error .dot{ background:var(--shu); animation:none; }
+  @keyframes pulse{ 50%{ opacity:.3; } }
+
+  section{ margin-bottom:32px; }
+  .section-label{
+    font-family:"Shippori Mincho", serif;
+    font-size:14px;
+    font-weight:600;
+    color:var(--ai-deep);
+    display:flex;
+    align-items:baseline;
+    gap:10px;
+    margin-bottom:14px;
+  }
+  .section-label .num{
+    font-family:"JetBrains Mono", monospace;
+    font-size:11px;
+    color:var(--shu);
+    border:1px solid var(--shu);
+    border-radius:3px;
+    padding:1px 6px;
+  }
+
+  /* ── 設定パネル ───────────────────────────────────── */
+  .settings-card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:10px;
+    box-shadow:var(--shadow);
+    padding:22px 24px 8px;
+  }
+  .settings-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:18px 28px;
+  }
+  @media (max-width:640px){ .settings-grid{ grid-template-columns:1fr; } }
+
+  .field{ margin-bottom:18px; }
+  .field label{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    font-size:12.5px;
+    color:var(--ink-soft);
+    margin-bottom:6px;
+    letter-spacing:.02em;
+  }
+  .field label .val{
+    font-family:"JetBrains Mono", monospace;
+    color:var(--ai);
+    font-size:12px;
+    font-weight:500;
+  }
+  .field input[type="text"], .field select{
+    width:100%;
+    font:inherit;
+    font-size:14px;
+    padding:8px 10px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:#fff;
+    color:var(--ink);
+  }
+  .field input[type="range"]{
+    width:100%;
+    accent-color:var(--ai);
+  }
+
+  /* ── 原稿用紙風テキストエリア ─────────────────────── */
+  .genko-wrap{
+    position:relative;
+    border:1px solid var(--line);
+    border-radius:10px;
+    background:
+      repeating-linear-gradient(0deg, transparent 0 27px, var(--line-soft) 27px 28px),
+      repeating-linear-gradient(90deg, transparent 0 27px, var(--line-soft) 27px 28px),
+      #FBF9F2;
+    box-shadow:var(--shadow);
+    overflow:hidden;
+  }
+  textarea{
+    display:block;
+    width:100%;
+    min-height:220px;
+    resize:vertical;
+    border:none;
+    outline:none;
+    background:transparent;
+    font-family:"Shippori Mincho", serif;
+    font-size:17px;
+    line-height:28px;
+    padding:12px 16px;
+    color:var(--ink);
+  }
+  textarea::placeholder{ color:#B4AC9C; }
+
+  /* ── ボタン ───────────────────────────────────────── */
+  .actions{
+    display:flex;
+    align-items:center;
+    gap:16px;
+    margin-top:18px;
+    flex-wrap:wrap;
+  }
+  button#generate-btn{
+    font-family:"Shippori Mincho", serif;
+    font-size:16px;
+    font-weight:700;
+    letter-spacing:.08em;
+    color:#fff;
+    background:var(--ai);
+    border:none;
+    border-radius:8px;
+    padding:14px 30px;
+    cursor:pointer;
+    box-shadow:0 4px 0 var(--ai-deep);
+    transition:transform .08s ease, box-shadow .08s ease;
+  }
+  button#generate-btn:hover:not(:disabled){ transform:translateY(-1px); }
+  button#generate-btn:active:not(:disabled){ transform:translateY(3px); box-shadow:0 1px 0 var(--ai-deep); }
+  button#generate-btn:disabled{
+    background:#B9B3A3; box-shadow:none; cursor:not-allowed;
+  }
+
+  .progress-wrap{
+    flex:1;
+    min-width:200px;
+    display:none;
+    flex-direction:column;
+    gap:4px;
+  }
+  .progress-wrap.show{ display:flex; }
+  .progress-bar{
+    height:8px;
+    border-radius:4px;
+    background:var(--line-soft);
+    overflow:hidden;
+  }
+  .progress-bar > div{
+    height:100%;
+    width:0%;
+    background:linear-gradient(90deg, var(--ai), var(--shu-soft));
+    transition:width .2s ease;
+  }
+  .progress-label{
+    font-size:11.5px;
+    color:var(--ink-soft);
+    font-family:"JetBrains Mono", monospace;
+  }
+
+  #log{
+    margin-top:12px;
+    font-size:12.5px;
+    color:var(--ink-soft);
+    white-space:pre-wrap;
+    line-height:1.7;
+  }
+  #log .err{ color:var(--shu); font-weight:700; }
+  #log .ok{ color:#3F7D51; font-weight:700; }
+
+  /* ── プレビュー ───────────────────────────────────── */
+  .preview-card{
+    border:1px solid var(--line);
+    border-radius:10px;
+    background:#FBF9F2;
+    box-shadow:var(--shadow);
+    padding:28px 30px;
+    min-height:80px;
+  }
+  .preview-empty{
+    color:#B4AC9C;
+    font-size:13px;
+  }
+  .preview-line{
+    line-height:2.9;
+    font-size:17px;
+  }
+  .preview-line ruby{ margin:0 1px; }
+  .preview-line rt{
+    color:var(--shu);
+    font-size:.42em;
+    letter-spacing:.02em;
+  }
+  .preview-note{
+    margin-top:16px;
+    padding-top:14px;
+    border-top:1px dashed var(--line);
+    font-size:11.5px;
+    color:var(--ink-soft);
+    line-height:1.7;
+  }
+
+  footer{
+    margin-top:56px;
+    padding-top:20px;
+    border-top:1px solid var(--line);
+    font-size:11.5px;
+    color:var(--ink-soft);
+    display:flex;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:8px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div class="title-block">
+      <h1>ふ<span class="ruby-accent">り</span>がな Word 生成</h1>
+      <p>日本語の文章に自動でルビを振り、Word文書（.docx）として書き出します</p>
+    </div>
+    <div class="seal">生成</div>
+  </header>
+
+  <div id="dict-status">
+    <span class="dot"></span>
+    <span id="dict-status-text">辞書（kuromoji.js）を読み込んでいます…初回は数秒かかることがあります</span>
+  </div>
+
+  <section>
+    <div class="section-label"><span class="num">01</span>設定</div>
+    <div class="settings-card">
+      <div class="settings-grid">
+        <div class="field">
+          <label>フォント名 <span class="val" id="val-font"></span></label>
+          <input type="text" id="w-font" value="UD デジタル 教科書体 NK">
+        </div>
+        <div class="field">
+          <label>文字揃え</label>
+          <select id="w-align">
+            <option value="distributeLetter" selected>均等割り付け</option>
+            <option value="left">左揃え</option>
+            <option value="center">中央揃え</option>
+            <option value="right">右揃え</option>
+            <option value="both">両端揃え</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>本文サイズ (pt) <span class="val" id="val-body">11</span></label>
+          <input type="range" id="w-body" min="5" max="72" step="1" value="11">
+        </div>
+        <div class="field">
+          <label>ルビサイズ (pt) <span class="val" id="val-ruby">5</span></label>
+          <input type="range" id="w-ruby" min="3" max="20" step="1" value="5">
+        </div>
+        <div class="field">
+          <label>オフセット (0.01mm) <span class="val" id="val-offset">10</span></label>
+          <input type="range" id="w-offset" min="-200" max="200" step="10" value="10">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-label"><span class="num">02</span>テキスト入力</div>
+    <div class="genko-wrap">
+      <textarea id="w-text" placeholder="ここにふりがなをつけたい文章を貼り付けてください"></textarea>
+    </div>
+
+    <div class="actions">
+      <button id="generate-btn" disabled>▶ ふりがなを付けて Word を生成</button>
+      <div class="progress-wrap" id="progress-wrap">
+        <div class="progress-bar"><div id="progress-fill"></div></div>
+        <div class="progress-label" id="progress-label">待機中</div>
+      </div>
+    </div>
+    <div id="log"></div>
+  </section>
+
+  <section>
+    <div class="section-label"><span class="num">03</span>プレビュー</div>
+    <div class="preview-card" id="preview-card">
+      <div class="preview-empty">生成すると、ここにルビ付きのプレビューが表示されます</div>
+    </div>
+    <div class="preview-note">
+      ※ プレビューはブラウザの &lt;ruby&gt; 表示による簡易確認です。実際の見た目（フォント・文字揃え・ルビの位置）はダウンロードした Word ファイルでご確認ください。
+    </div>
+  </section>
+
+  <footer>
+    <span>形態素解析: kuromoji.js（IPADIC）／すべての処理はブラウザ内で完結し、テキストは外部送信されません</span>
+    <span id="version-tag">client-only build</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ============================================================
+   *  文字種判定・ひらがな変換ユーティリティ
+   * ============================================================ */
+  const RE_KANJI = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/;
+
+  function isKanji(ch){ return RE_KANJI.test(ch); }
+
+  function kataToHira(text){
+    let out = "";
+    for (const c of text){
+      const code = c.codePointAt(0);
+      if (code >= 0x30A1 && code <= 0x30F6){
+        out += String.fromCodePoint(code - 0x60);
+      } else {
+        out += c;
+      }
+    }
+    return out;
+  }
+
+  /* ── surface を漢字ブロック／非漢字ブロックに分割 ────────── */
+  function splitSurface(surface){
+    const blocks = [];
+    let buf = "";
+    let mode = null;
+    for (const ch of surface){
+      const m = isKanji(ch) ? "kanji" : "non";
+      if (m !== mode){
+        if (buf) blocks.push([mode, buf]);
+        buf = ch;
+        mode = m;
+      } else {
+        buf += ch;
+      }
+    }
+    if (buf) blocks.push([mode, buf]);
+    return blocks;
+  }
+
+  /* ── 読みを surface 構造に合わせて割り当てる ─────────────── */
+  function assignReading(surface, readingHira){
+    const blocks = splitSurface(surface);
+
+    if (blocks.length === 1){
+      const [kind, text] = blocks[0];
+      return kind === "kanji" ? [[text, readingHira]] : [[text, null]];
+    }
+
+    let remaining = readingHira;
+    const result = [];
+
+    // 末尾の非漢字ブロックを読みの末尾から削る（送り仮名処理）
+    const tailNon = [];
+    for (let i = blocks.length - 1; i >= 0; i--){
+      const [kind, text] = blocks[i];
+      if (kind === "non") tailNon.unshift(text);
+      else break;
+    }
+    for (const text of tailNon){
+      const hiraText = kataToHira(text);
+      if (remaining.endsWith(hiraText)){
+        remaining = remaining.slice(0, remaining.length - hiraText.length);
+      }
+    }
+
+    // 先頭の非漢字ブロックを読みの先頭から削る（ごみ箱 など）
+    const headNon = [];
+    for (const [kind, text] of blocks){
+      if (kind === "non") headNon.push(text);
+      else break;
+    }
+    for (const text of headNon){
+      const hiraText = kataToHira(text);
+      if (remaining.startsWith(hiraText)){
+        remaining = remaining.slice(hiraText.length);
+      }
+    }
+
+    // ブロックを順番に処理して結果を組み立てる
+    for (const [kind, text] of blocks){
+      if (kind === "non"){
+        result.push([text, null]);
+      } else {
+        result.push([text, remaining ? remaining : null]);
+        remaining = "";
+      }
+    }
+    return result;
+  }
+
+  /* ── 形態素解析 → (surface, reading|null) のリスト ───────── */
+  function tokenizeWithRuby(text, tokenizer){
+    const words = tokenizer.tokenize(text);
+    const result = [];
+    for (const word of words){
+      const surface = word.surface_form;
+      if (!surface) continue;
+      const hasKanji = RE_KANJI.test(surface);
+
+      if (!hasKanji){
+        result.push([surface, null]);
+        continue;
+      }
+
+      let reading = word.reading;
+      if (!reading || reading === "*"){
+        result.push([surface, null]);
+        continue;
+      }
+      reading = kataToHira(reading);
+      if (!reading || reading === kataToHira(surface)){
+        result.push([surface, null]);
+        continue;
+      }
+
+      const assigned = assignReading(surface, reading);
+      for (const pair of assigned) result.push(pair);
+    }
+    return result;
+  }
+
+  /* ============================================================
+   *  Word (.docx) 生成 — Python版と同一のOOXML構造を再現
+   * ============================================================ */
+  function escXml(s){
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+  }
+
+  function makeRpr(font, sizePt){
+    const f = escXml(font);
+    return `<w:rPr><w:rFonts w:ascii="${f}" w:hAnsi="${f}" w:eastAsia="${f}" w:cs="${f}"/>`
+         + `<w:sz w:val="${sizePt * 2}"/><w:szCs w:val="${sizePt * 2}"/></w:rPr>`;
+  }
+
+  function makeRubyElem(surface, reading, font, bodyPt, rubyPt, offset){
+    return `<w:ruby>`
+      + `<w:rubyPr>`
+      +   `<w:rubyAlign w:val="distributeLetter"/>`
+      +   `<w:hps w:val="${rubyPt * 2}"/>`
+      +   `<w:hpsRaise w:val="${rubyPt * 2 + offset}"/>`
+      +   `<w:hpsBaseText w:val="${bodyPt * 2}"/>`
+      +   `<w:lid w:val="ja-JP"/>`
+      + `</w:rubyPr>`
+      + `<w:rt><w:r>${makeRpr(font, rubyPt)}<w:t xml:space="preserve">${escXml(reading)}</w:t></w:r></w:rt>`
+      + `<w:rubyBase><w:r>${makeRpr(font, bodyPt)}<w:t xml:space="preserve">${escXml(surface)}</w:t></w:r></w:rubyBase>`
+      + `</w:ruby>`;
+  }
+
+  function makePlainRun(text, font, bodyPt){
+    const preserve = (text !== text.trim()) ? ` xml:space="preserve"` : "";
+    return `<w:r>${makeRpr(font, bodyPt)}<w:t${preserve}>${escXml(text)}</w:t></w:r>`;
+  }
+
+  function buildParagraphXml(tokens, font, bodyPt, rubyPt, offset, align){
+    let inner = "";
+    for (const [surface, reading] of tokens){
+      if (!surface) continue;
+      inner += reading
+        ? makeRubyElem(surface, reading, font, bodyPt, rubyPt, offset)
+        : makePlainRun(surface, font, bodyPt);
+    }
+    const f = escXml(font);
+    const pPr = `<w:pPr><w:jc w:val="${align}"/>`
+      + `<w:rPr><w:rFonts w:ascii="${f}" w:hAnsi="${f}" w:eastAsia="${f}" w:cs="${f}"/>`
+      + `<w:sz w:val="${bodyPt * 2}"/><w:szCs w:val="${bodyPt * 2}"/></w:rPr></w:pPr>`;
+    return `<w:p>${pPr}${inner}</w:p>`;
+  }
+
+  async function buildDocx(linesTokens, font, bodyPt, rubyPt, offset, align){
+    const DOC_NS = 'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" '
+      + 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+      + 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+      + 'xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" '
+      + 'xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml" '
+      + 'mc:Ignorable="w14 w15"';
+
+    const paragraphs = linesTokens
+      .map(tokens => buildParagraphXml(tokens, font, bodyPt, rubyPt, offset, align))
+      .join("");
+
+    const sect = '<w:sectPr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+      + '<w:pgSz w:w="11906" w:h="16838"/>'
+      + '<w:pgMar w:top="1080" w:right="1080" w:bottom="1080" w:left="1080" w:header="720" w:footer="720" w:gutter="0"/>'
+      + '</w:sectPr>';
+
+    const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+      + `<w:document ${DOC_NS}><w:body>${paragraphs}${sect}</w:body></w:document>`;
+
+    const CONTENT_TYPES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+      + `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`
+      + `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>`
+      + `<Default Extension="xml" ContentType="application/xml"/>`
+      + `<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>`
+      + `<Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>`
+      + `</Types>`;
+
+    const RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+      + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
+      + `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>`
+      + `</Relationships>`;
+
+    const DOC_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+      + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
+      + `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>`
+      + `</Relationships>`;
+
+    const SETTINGS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+      + `<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">`
+      + `<w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat>`
+      + `</w:settings>`;
+
+    const zip = new JSZip();
+    zip.file("[Content_Types].xml", CONTENT_TYPES);
+    zip.file("_rels/.rels", RELS);
+    zip.file("word/_rels/document.xml.rels", DOC_RELS);
+    zip.file("word/document.xml", docXml);
+    zip.file("word/settings.xml", SETTINGS);
+
+    return zip.generateAsync({
+      type: "blob",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    });
+  }
+
+  /* ============================================================
+   *  UI 配線
+   * ============================================================ */
+  const $ = id => document.getElementById(id);
+
+  const dictStatus     = $("dict-status");
+  const dictStatusText = $("dict-status-text");
+  const generateBtn    = $("generate-btn");
+  const wText           = $("w-text");
+  const wFont           = $("w-font");
+  const wAlign          = $("w-align");
+  const wBody           = $("w-body");
+  const wRuby           = $("w-ruby");
+  const wOffset         = $("w-offset");
+  const valFont         = $("val-font");
+  const valBody         = $("val-body");
+  const valRuby         = $("val-ruby");
+  const valOffset       = $("val-offset");
+  const progressWrap    = $("progress-wrap");
+  const progressFill    = $("progress-fill");
+  const progressLabel   = $("progress-label");
+  const logEl           = $("log");
+  const previewCard     = $("preview-card");
+
+  function syncSliderLabels(){
+    valFont.textContent   = "";
+    valBody.textContent   = wBody.value;
+    valRuby.textContent   = wRuby.value;
+    valOffset.textContent = wOffset.value;
+  }
+  [wBody, wRuby, wOffset].forEach(el => el.addEventListener("input", syncSliderLabels));
+  syncSliderLabels();
+
+  function setProgress(pct, label){
+    progressFill.style.width = pct + "%";
+    progressLabel.textContent = label || (pct + "%");
+  }
+
+  function log(msg, cls){
+    const line = document.createElement("div");
+    if (cls) line.className = cls;
+    line.textContent = msg;
+    logEl.appendChild(line);
+  }
+
+  function clearLog(){ logEl.innerHTML = ""; }
+
+  /* ── 辞書ロード ───────────────────────────────────────── */
+  let tokenizer = null;
+
+  function initTokenizer(){
+    kuromoji.builder({ dicPath: "https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/" })
+      .build(function (err, builtTokenizer){
+        if (err){
+          dictStatus.classList.add("error");
+          dictStatusText.textContent = "辞書の読み込みに失敗しました。通信環境を確認し、ページを再読み込みしてください。";
+          console.error(err);
+          return;
+        }
+        tokenizer = builtTokenizer;
+        dictStatus.classList.add("ready");
+        dictStatusText.textContent = "辞書の読み込みが完了しました。ふりがなを生成できます。";
+        generateBtn.disabled = false;
+      });
+  }
+  initTokenizer();
+
+  /* ── プレビュー描画 ───────────────────────────────────── */
+  function renderPreview(linesTokens){
+    previewCard.innerHTML = "";
+    let hasContent = false;
+    for (const tokens of linesTokens){
+      const lineEl = document.createElement("div");
+      lineEl.className = "preview-line";
+      for (const [surface, reading] of tokens){
+        if (!surface) continue;
+        if (surface === "\u3000" && tokens.length === 1){
+          lineEl.appendChild(document.createElement("br"));
+          continue;
+        }
+        hasContent = true;
+        if (reading){
+          const ruby = document.createElement("ruby");
+          ruby.appendChild(document.createTextNode(surface));
+          const rt = document.createElement("rt");
+          rt.textContent = reading;
+          ruby.appendChild(rt);
+          lineEl.appendChild(ruby);
+        } else {
+          lineEl.appendChild(document.createTextNode(surface));
+        }
+      }
+      previewCard.appendChild(lineEl);
+    }
+    if (!hasContent){
+      previewCard.innerHTML = '<div class="preview-empty">生成すると、ここにルビ付きのプレビューが表示されます</div>';
+    }
+  }
+
+  /* ── 生成ボタン ───────────────────────────────────────── */
+  async function onGenerate(){
+    clearLog();
+    const text = wText.value.trim();
+    if (!text){
+      log("⚠️ テキストが入力されていません。", "err");
+      return;
+    }
+    if (!tokenizer){
+      log("⚠️ 辞書がまだ読み込まれていません。少し待ってから再度お試しください。", "err");
+      return;
+    }
+
+    const font    = wFont.value.trim() || "UD デジタル 教科書体 NK";
+    const bodyPt  = parseInt(wBody.value, 10);
+    const rubyPt  = parseInt(wRuby.value, 10);
+    const offset  = parseInt(wOffset.value, 10);
+    const align   = wAlign.value;
+
+    generateBtn.disabled = true;
+    progressWrap.classList.add("show");
+
+    const rawLines = text.split(/\r\n|\r|\n/);
+    const total = Math.max(rawLines.length, 1);
+    const allLinesTokens = [];
+
+    setProgress(5, "解析中...");
+    log(`🔍 ${total} 行を形態素解析中...`);
+
+    for (let i = 0; i < rawLines.length; i++){
+      setProgress(5 + Math.floor(60 * i / total), `解析中 ${i + 1}/${total}`);
+      const line = rawLines[i];
+      if (line.trim() === ""){
+        allLinesTokens.push([["\u3000", null]]);
+      } else {
+        allLinesTokens.push(tokenizeWithRuby(line, tokenizer));
+      }
+      // UIを固まらせないよう1行ごとに描画を挟む
+      if (i % 3 === 0) await new Promise(requestAnimationFrame);
+    }
+
+    renderPreview(allLinesTokens);
+
+    setProgress(70, "Word 生成中...");
+    log("📄 Word ファイルを生成中...");
+    await new Promise(requestAnimationFrame);
+
+    let blob;
+    try {
+      blob = await buildDocx(allLinesTokens, font, bodyPt, rubyPt, offset, align);
+    } catch (e){
+      setProgress(0, "エラー");
+      log(`❌ Word 生成エラー: ${e.message}`, "err");
+      console.error(e);
+      generateBtn.disabled = false;
+      return;
+    }
+
+    setProgress(90, "ダウンロード準備中...");
+
+    const fname = "furigana_output.docx";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+
+    setProgress(100, "✅ 完了！");
+    log(`✅ 完了！ '${fname}' をダウンロードしました。`, "ok");
+
+    generateBtn.disabled = false;
+  }
+
+  generateBtn.addEventListener("click", onGenerate);
+
+})();
+</script>
+</body>
+</html>
