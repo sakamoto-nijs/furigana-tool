@@ -673,16 +673,10 @@
   function clearLog(){ logEl.innerHTML = ""; }
 
   /* ── 辞書ロード ───────────────────────────────────────── */
+  // 外部の絶対URLをdicPathに渡すとkuromoji.js内部のパス結合処理で
+  // URLが壊れる既知の不具合があるため、同一オリジンの相対パスから読み込む。
+  // (index.html と同じ階層に dict/ フォルダを置くこと)
   let tokenizer = null;
-
-  // jsDelivr直配信の .gz は二重圧縮の相性問題で解凍が止まることがあるため、
-  // 素直に解凍できる配信元をこちらから優先して試す。
-  const DICT_SOURCES = [
-    "https://kuromojin.netlify.app/dict/",
-    "https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/"
-  ];
-
-  let dictAttempt = 0;
   let timeoutHandle = null;
   let settled = false;
 
@@ -695,7 +689,6 @@
     retryBtn.textContent = "再試行";
     retryBtn.style.cssText = "margin-left:10px;font-size:12px;padding:3px 10px;border-radius:5px;border:1px solid var(--shu);background:#fff;color:var(--shu);cursor:pointer;";
     retryBtn.addEventListener("click", function(){
-      dictAttempt = 0;
       dictStatus.classList.remove("error");
       dictStatusText.textContent = "辞書（kuromoji.js）を読み込んでいます…初回は数秒かかることがあります";
       settled = false;
@@ -706,30 +699,22 @@
   }
 
   function tryLoadDict(){
-    if (dictAttempt >= DICT_SOURCES.length){
-      showRetryUI("辞書の読み込みに時間がかかりすぎています。通信環境（社内ネットワークやVPNなど）が原因の可能性があります。");
-      return;
-    }
-    const dicPath = DICT_SOURCES[dictAttempt];
-    dictAttempt++;
     settled = false;
-
     clearTimeout(timeoutHandle);
     timeoutHandle = setTimeout(function(){
       if (settled) return;
       settled = true;
-      // このソースは時間切れ → 次の配信元を試す
-      tryLoadDict();
+      showRetryUI("辞書の読み込みに時間がかかりすぎています。index.html と同じ階層に dict フォルダを置いたか確認してください。");
     }, 20000);
 
-    kuromoji.builder({ dicPath: dicPath }).build(function (err, builtTokenizer){
-      if (settled) return; // タイムアウト後に遅れて結果が来た場合は無視
+    kuromoji.builder({ dicPath: "dict/" }).build(function (err, builtTokenizer){
+      if (settled) return;
       settled = true;
       clearTimeout(timeoutHandle);
 
       if (err){
         console.error(err);
-        tryLoadDict(); // 次の配信元を試す
+        showRetryUI("辞書の読み込みに失敗しました（dict フォルダが見つからない可能性があります）。");
         return;
       }
       tokenizer = builtTokenizer;
