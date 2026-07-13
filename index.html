@@ -704,17 +704,17 @@
     timeoutHandle = setTimeout(function(){
       if (settled) return;
       settled = true;
-      showRetryUI("辞書の読み込みに時間がかかりすぎています。index.html と同じ階層に dict フォルダを置いたか確認してください。");
+      showRetryUI("辞書の読み込みに時間がかかりすぎています。base.dat.gz などの辞書ファイルが index.html と同じ階層にあるか確認してください。");
     }, 20000);
 
-    kuromoji.builder({ dicPath: "dict/" }).build(function (err, builtTokenizer){
+    kuromoji.builder({ dicPath: "./" }).build(function (err, builtTokenizer){
       if (settled) return;
       settled = true;
       clearTimeout(timeoutHandle);
 
       if (err){
         console.error(err);
-        showRetryUI("辞書の読み込みに失敗しました（dict フォルダが見つからない可能性があります）。");
+        showRetryUI("辞書の読み込みに失敗しました（base.dat.gz などのファイルが見つからない可能性があります）。");
         return;
       }
       tokenizer = builtTokenizer;
