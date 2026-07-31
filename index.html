@@ -377,7 +377,36 @@
   </section>
 
   <section>
-    <div class="section-label"><span class="num">03</span>プレビュー</div>
+    <div class="section-label"><span class="num">03</span>Word ファイルにルビを付ける（追加機能）</div>
+    <div class="settings-card">
+      <div class="field" style="margin-bottom:14px;">
+        <label>ルビの書式</label>
+        <select id="docx-mode">
+          <option value="keep" selected>元のファイルの書式を維持し、ルビだけ追加する</option>
+          <option value="settings">上の「設定」パネルの値（フォント名・本文サイズ）を適用する</option>
+        </select>
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <label>Word ファイル（.docx）を選択</label>
+        <input type="file" id="docx-file" accept=".docx">
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="docx-generate-btn" disabled>▶ Word にルビを付けて生成</button>
+      <div class="progress-wrap" id="docx-progress-wrap">
+        <div class="progress-bar"><div id="docx-progress-fill"></div></div>
+        <div class="progress-label" id="docx-progress-label">待機中</div>
+      </div>
+    </div>
+    <div id="docx-log"></div>
+    <div class="preview-note">
+      ※ 本文の段落だけが対象です。表・画像・ヘッダー/フッター内の文字にはルビは付きません。
+    </div>
+  </section>
+
+  <section>
+    <div class="section-label"><span class="num">04</span>プレビュー</div>
     <div class="preview-card" id="preview-card">
       <div class="preview-empty">生成すると、ここにルビ付きのプレビューが表示されます</div>
     </div>
@@ -649,6 +678,14 @@
   const logEl           = $("log");
   const previewCard     = $("preview-card");
 
+  const docxModeSel        = $("docx-mode");
+  const docxFileInput      = $("docx-file");
+  const docxGenerateBtn    = $("docx-generate-btn");
+  const docxProgressWrap   = $("docx-progress-wrap");
+  const docxProgressFill   = $("docx-progress-fill");
+  const docxProgressLabel  = $("docx-progress-label");
+  const docxLogEl          = $("docx-log");
+
   function syncSliderLabels(){
     valFont.textContent   = "";
     valBody.textContent   = wBody.value;
@@ -722,6 +759,7 @@
       dictStatus.classList.add("ready");
       dictStatusText.textContent = "辞書の読み込みが完了しました。ふりがなを生成できます。";
       generateBtn.disabled = false;
+      docxGenerateBtn.disabled = false;
     });
   }
 
@@ -836,6 +874,198 @@
   }
 
   generateBtn.addEventListener("click", onGenerate);
+
+  /* ============================================================
+   *  追加機能: アップロードした .docx にルビを付与する
+   * ============================================================ */
+  const WORD_XML_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+
+  function docxSetProgress(pct, label){
+    docxProgressFill.style.width = pct + "%";
+    docxProgressLabel.textContent = label || (pct + "%");
+  }
+  function docxLog(msg, cls){
+    const line = document.createElement("div");
+    if (cls) line.className = cls;
+    line.textContent = msg;
+    docxLogEl.appendChild(line);
+  }
+  function docxClearLog(){ docxLogEl.innerHTML = ""; }
+
+  function getSzPtFromRPr(rPrNode){
+    if (!rPrNode) return null;
+    const szEl = rPrNode.getElementsByTagName("w:sz")[0];
+    if (!szEl) return null;
+    const val = parseInt(szEl.getAttribute("w:val"), 10);
+    return isNaN(val) ? null : val / 2;
+  }
+
+  // ルビ側(rt)は常にmakeRpr()を使い、ベース側(本文)は呼び出し元が
+  // 用意したrPrのXML文字列(元の書式 or 設定パネルの書式)をそのまま埋め込む。
+  function makeRubyElemCustomBase(surface, reading, baseRPrXml, rubyFont, rubyPt, offset, basePtForOffset){
+    return `<w:ruby>`
+      + `<w:rubyPr>`
+      +   `<w:rubyAlign w:val="distributeLetter"/>`
+      +   `<w:hps w:val="${rubyPt * 2}"/>`
+      +   `<w:hpsRaise w:val="${rubyPt * 2 + offset}"/>`
+      +   `<w:hpsBaseText w:val="${basePtForOffset * 2}"/>`
+      +   `<w:lid w:val="ja-JP"/>`
+      + `</w:rubyPr>`
+      + `<w:rt><w:r>${makeRpr(rubyFont, rubyPt)}<w:t xml:space="preserve">${escXml(reading)}</w:t></w:r></w:rt>`
+      + `<w:rubyBase><w:r>${baseRPrXml}<w:t xml:space="preserve">${escXml(surface)}</w:t></w:r></w:rubyBase>`
+      + `</w:ruby>`;
+  }
+  function makePlainRunCustomBase(text, baseRPrXml){
+    const preserve = (text !== text.trim()) ? ` xml:space="preserve"` : "";
+    return `<w:r>${baseRPrXml}<w:t${preserve}>${escXml(text)}</w:t></w:r>`;
+  }
+
+  function parseFragmentNodes(xmlFragment, ownerDoc){
+    const wrapped = `<root ${WORD_XML_NS}>${xmlFragment}</root>`;
+    const parsed = new DOMParser().parseFromString(wrapped, "application/xml");
+    const perr = parsed.getElementsByTagName("parsererror")[0];
+    if (perr) throw new Error("生成した断片の解析に失敗しました: " + perr.textContent.slice(0, 200));
+    const root = parsed.documentElement;
+    const nodes = [];
+    for (let i = 0; i < root.childNodes.length; i++){
+      nodes.push(ownerDoc.importNode(root.childNodes[i], true));
+    }
+    return nodes;
+  }
+
+  async function processDocxFile(file, mode){
+    docxClearLog();
+    docxProgressWrap.classList.add("show");
+    docxSetProgress(5, "ファイルを読み込み中...");
+    docxLog(`📂 '${file.name}' を読み込み中...`);
+
+    const zip = await JSZip.loadAsync(file);
+    const docXmlPath = "word/document.xml";
+    const docFile = zip.file(docXmlPath);
+    if (!docFile){
+      throw new Error("word/document.xml が見つかりません。Wordの標準的な .docx ファイルではない可能性があります。");
+    }
+    const xmlStr = await docFile.async("string");
+
+    docxSetProgress(20, "文書を解析中...");
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlStr, "application/xml");
+    const perr = xmlDoc.getElementsByTagName("parsererror")[0];
+    if (perr){
+      throw new Error("document.xml の解析に失敗しました。ファイルが壊れている可能性があります。");
+    }
+
+    const font    = wFont.value.trim() || "UD デジタル 教科書体 NK";
+    const bodyPt  = parseInt(wBody.value, 10);
+    const rubyPt  = parseInt(wRuby.value, 10);
+    const offset  = parseInt(wOffset.value, 10);
+    const serializer = new XMLSerializer();
+
+    const paragraphs = xmlDoc.getElementsByTagName("w:p");
+    const totalParagraphs = Math.max(paragraphs.length, 1);
+    docxLog(`🔍 ${paragraphs.length} 段落を処理します...`);
+
+    let processedRuns = 0;
+
+    for (let pi = 0; pi < paragraphs.length; pi++){
+      docxSetProgress(20 + Math.floor(55 * pi / totalParagraphs), `解析中 ${pi + 1}/${paragraphs.length}`);
+
+      const runs = Array.prototype.slice.call(paragraphs[pi].getElementsByTagName("w:r"));
+      for (const runNode of runs){
+        const tNodes = runNode.getElementsByTagName("w:t");
+        if (tNodes.length === 0) continue; // 画像・タブ・改行のみのrunはスキップ
+        const text = tNodes[0].textContent || "";
+        if (!text || !RE_KANJI.test(text)) continue;
+
+        const tokens = tokenizeWithRuby(text, tokenizer);
+        const hasRuby = tokens.some(t => t[1]);
+        if (!hasRuby) continue;
+
+        const rPrNode = runNode.getElementsByTagName("w:rPr")[0] || null;
+
+        let baseRPrXml, basePtForOffset, rubyFont;
+        if (mode === "settings"){
+          baseRPrXml = makeRpr(font, bodyPt);
+          basePtForOffset = bodyPt;
+          rubyFont = font;
+        } else {
+          baseRPrXml = rPrNode ? serializer.serializeToString(rPrNode) : "";
+          basePtForOffset = getSzPtFromRPr(rPrNode) || 11;
+          rubyFont = font;
+        }
+
+        let fragmentXml = "";
+        for (const [surface, reading] of tokens){
+          if (!surface) continue;
+          fragmentXml += reading
+            ? makeRubyElemCustomBase(surface, reading, baseRPrXml, rubyFont, rubyPt, offset, basePtForOffset)
+            : makePlainRunCustomBase(surface, baseRPrXml);
+        }
+
+        const newNodes = parseFragmentNodes(fragmentXml, xmlDoc);
+        const parent = runNode.parentNode;
+        for (const n of newNodes) parent.insertBefore(n, runNode);
+        parent.removeChild(runNode);
+        processedRuns++;
+      }
+      // UIを固まらせないよう時々描画を挟む
+      if (pi % 15 === 0) await new Promise(requestAnimationFrame);
+    }
+
+    docxLog(`✏️ ${processedRuns} 箇所にルビを追加しました。`);
+    docxSetProgress(80, "Word ファイルを再構成中...");
+
+    const newXmlStr = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
+      + serializer.serializeToString(xmlDoc);
+    zip.file(docXmlPath, newXmlStr);
+
+    docxSetProgress(92, "ダウンロード準備中...");
+    const blob = await zip.generateAsync({
+      type: "blob",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    });
+
+    const outName = file.name.replace(/\.docx$/i, "") + "_ふりがな.docx";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = outName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+
+    docxSetProgress(100, "✅ 完了！");
+    docxLog(`✅ 完了！ '${outName}' をダウンロードしました。`, "ok");
+  }
+
+  docxFileInput.addEventListener("change", function(){
+    docxGenerateBtn.disabled = !(docxFileInput.files && docxFileInput.files.length && tokenizer);
+  });
+
+  docxGenerateBtn.addEventListener("click", async function(){
+    if (!tokenizer){
+      docxClearLog();
+      docxLog("⚠️ 辞書がまだ読み込まれていません。少し待ってから再度お試しください。", "err");
+      return;
+    }
+    const file = docxFileInput.files && docxFileInput.files[0];
+    if (!file){
+      docxClearLog();
+      docxLog("⚠️ Word ファイル（.docx）を選択してください。", "err");
+      return;
+    }
+    docxGenerateBtn.disabled = true;
+    try {
+      await processDocxFile(file, docxModeSel.value);
+    } catch (e){
+      docxSetProgress(0, "エラー");
+      docxLog(`❌ エラー: ${e.message}`, "err");
+      console.error(e);
+    } finally {
+      docxGenerateBtn.disabled = false;
+    }
+  });
 
 })();
 </script>
