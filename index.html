@@ -209,7 +209,7 @@
     margin-top:18px;
     flex-wrap:wrap;
   }
-  button#generate-btn{
+  button#generate-btn, button#docx-generate-btn{
     font-family:"Hiragino Mincho ProN", "Yu Mincho", serif;
     font-size:16px;
     font-weight:700;
@@ -223,9 +223,9 @@
     box-shadow:0 4px 0 var(--ai-deep);
     transition:transform .08s ease, box-shadow .08s ease;
   }
-  button#generate-btn:hover:not(:disabled){ transform:translateY(-1px); }
-  button#generate-btn:active:not(:disabled){ transform:translateY(3px); box-shadow:0 1px 0 var(--ai-deep); }
-  button#generate-btn:disabled{
+  button#generate-btn:hover:not(:disabled), button#docx-generate-btn:hover:not(:disabled){ transform:translateY(-1px); }
+  button#generate-btn:active:not(:disabled), button#docx-generate-btn:active:not(:disabled){ transform:translateY(3px); box-shadow:0 1px 0 var(--ai-deep); }
+  button#generate-btn:disabled, button#docx-generate-btn:disabled{
     background:#B9B3A3; box-shadow:none; cursor:not-allowed;
   }
 
@@ -1015,8 +1015,12 @@
     docxLog(`✏️ ${processedRuns} 箇所にルビを追加しました。`);
     docxSetProgress(80, "Word ファイルを再構成中...");
 
-    const newXmlStr = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
-      + serializer.serializeToString(xmlDoc);
+    // ブラウザによっては XMLSerializer が XML宣言を自動で含める場合があり、
+    // そのまま先頭に付け足すと宣言が二重になってしまう。既存の宣言があれば
+    // 一旦取り除いてから、こちらで確実に1つだけ付け直す。
+    let newXmlStr = serializer.serializeToString(xmlDoc);
+    newXmlStr = newXmlStr.replace(/^\uFEFF?\s*<\?xml[^>]*\?>\s*/i, "");
+    newXmlStr = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' + newXmlStr;
     zip.file(docXmlPath, newXmlStr);
 
     docxSetProgress(92, "ダウンロード準備中...");
