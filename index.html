@@ -173,6 +173,39 @@
     accent-color:var(--ai);
   }
 
+  /* ── 学年別漢字表示ボタン ─────────────────────────── */
+  .grade-buttons{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-bottom:18px;
+  }
+  .grade-btn{
+    font:inherit;
+    font-size:13px;
+    letter-spacing:.02em;
+    color:var(--ink-soft);
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:20px;
+    padding:7px 16px;
+    cursor:pointer;
+    transition:background .1s ease, color .1s ease, border-color .1s ease;
+  }
+  .grade-btn:hover{ border-color:var(--ai); color:var(--ai); }
+  .grade-btn.active{
+    background:var(--ai);
+    border-color:var(--ai);
+    color:#fff;
+    font-weight:600;
+  }
+  .grade-note{
+    font-size:12px;
+    color:var(--ink-soft);
+    line-height:1.7;
+    margin:0;
+  }
+
   /* ── 原稿用紙風テキストエリア ─────────────────────── */
   .genko-wrap{
     position:relative;
@@ -361,7 +394,25 @@
   </section>
 
   <section>
-    <div class="section-label"><span class="num">02</span>テキスト入力</div>
+    <div class="section-label"><span class="num">02</span>学年別 漢字表示設定</div>
+    <div class="settings-card" style="padding-bottom:20px;">
+      <div class="grade-buttons" id="grade-buttons">
+        <button type="button" class="grade-btn active" data-level="">すべて表示</button>
+        <button type="button" class="grade-btn" data-level="1">小1まで</button>
+        <button type="button" class="grade-btn" data-level="2">小2まで</button>
+        <button type="button" class="grade-btn" data-level="3">小3まで</button>
+        <button type="button" class="grade-btn" data-level="4">小4まで</button>
+        <button type="button" class="grade-btn" data-level="5">小5まで</button>
+        <button type="button" class="grade-btn" data-level="6">小6まで</button>
+        <button type="button" class="grade-btn" data-level="7">中学まで</button>
+        <button type="button" class="grade-btn" data-level="8">高校まで</button>
+      </div>
+      <p class="grade-note">選択した学年までに習う漢字だけで構成されている熟語には、ふりがなを付けません（熟語の中に一字でも未習の漢字が含まれる場合は、これまで通りふりがなを付けます）。「すべて表示」を選ぶと、この機能を使わず全ての漢字にふりがなを付けます。この設定は下の「テキスト入力」からの生成と、「Word ファイルにルビを付ける」機能の両方に適用されます。</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-label"><span class="num">03</span>テキスト入力</div>
     <div class="genko-wrap">
       <textarea id="w-text" placeholder="ここにふりがなをつけたい文章を貼り付けてください"></textarea>
     </div>
@@ -377,7 +428,7 @@
   </section>
 
   <section>
-    <div class="section-label"><span class="num">03</span>Word ファイルにルビを付ける（追加機能）</div>
+    <div class="section-label"><span class="num">04</span>Word ファイルにルビを付ける（追加機能）</div>
     <div class="settings-card">
       <div class="field" style="margin-bottom:14px;">
         <label>ルビの書式</label>
@@ -406,7 +457,7 @@
   </section>
 
   <section>
-    <div class="section-label"><span class="num">04</span>プレビュー</div>
+    <div class="section-label"><span class="num">05</span>プレビュー</div>
     <div class="preview-card" id="preview-card">
       <div class="preview-empty">生成すると、ここにルビ付きのプレビューが表示されます</div>
     </div>
@@ -431,6 +482,57 @@
   const RE_KANJI = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/;
 
   function isKanji(ch){ return RE_KANJI.test(ch); }
+
+  /* ============================================================
+   *  学年別漢字レベル判定
+   *  レベル1〜6: 小学校 各学年で新たに習う漢字（累積で判定）
+   *  レベル7   : 中学までに追加で習う漢字
+   *  レベル8   : 高校の読みでしか出てこない漢字（＝「控」のみ）
+   *  未収録の漢字（常用漢字表等の範囲外）は常に「未習」として扱う
+   * ============================================================ */
+  const GRADE_KANJI_STRINGS = [
+    "一右雨円王音下火花貝学気九休玉金空月犬見五口校左三山子四糸字耳七車手十出女小上森人水正生青夕石赤千川先早草足村大男竹中虫町天田土二日入年白八百文木本名目立力林六", // レベル1: 小1 (80字)
+    "引羽雲園遠何科夏家歌画回会海絵外角楽活間丸岩顔汽記帰弓牛魚京強教近兄形計元言原戸古午後語工公広交光考行高黄合谷国黒今才細作算止市矢姉思紙寺自時室社弱首秋週春書少場色食心新親図数西声星晴切雪船線前組走多太体台地池知茶昼長鳥朝直通弟店点電刀冬当東答頭同道読内南肉馬売買麦半番父風分聞米歩母方北毎妹万明鳴毛門夜野友用曜来里理話", // レベル2: 小2 (160字)
+    "悪安暗医委意育員院飲運泳駅央横屋温化荷界開階寒感漢館岸起期客究急級宮球去橋業曲局銀区苦具君係軽血決研県庫湖向幸港号根祭皿仕死使始指歯詩次事持式実写者主守取酒受州拾終習集住重宿所暑助昭消商章勝乗植申身神真深進世整昔全相送想息速族他打対待代第題炭短談着注柱丁帳調追定庭笛鉄転都度投豆島湯登等動童農波配倍箱畑発反坂板皮悲美鼻筆氷表秒病品負部服福物平返勉放味命面問役薬由油有遊予羊洋葉陽様落流旅両緑礼列練路和", // レベル3: 小3 (200字)
+    "愛案以衣位茨印英栄媛塩岡億加果貨課芽賀改械害街各覚潟完官管関観願岐希季旗器機議求泣給挙漁共協鏡競極熊訓軍郡群径景芸欠結建健験固功好香候康佐差菜最埼材崎昨札刷察参産散残氏司試児治滋辞鹿失借種周祝順初松笑唱焼照城縄臣信井成省清静席積折節説浅戦選然争倉巣束側続卒孫帯隊達単置仲沖兆低底的典伝徒努灯働特徳栃奈梨熱念敗梅博阪飯飛必票標不夫付府阜富副兵別辺変便包法望牧末満未民無約勇要養浴利陸良料量輪類令冷例連老労録", // レベル4: 小4 (202字)
+    "圧囲移因永営衛易益液演応往桜可仮価河過快解格確額刊幹慣眼紀基寄規喜技義逆久旧救居許境均禁句型経潔件険検限現減故個護効厚耕航鉱構興講告混査再災妻採際在財罪殺雑酸賛士支史志枝師資飼示似識質舎謝授修述術準序招証象賞条状常情織職制性政勢精製税責績接設絶祖素総造像増則測属率損貸態団断築貯張停提程適統堂銅導得毒独任燃能破犯判版比肥非費備評貧布婦武復複仏粉編弁保墓報豊防貿暴脈務夢迷綿輸余容略留領歴", // レベル5: 小5 (193字)
+    "胃異遺域宇映延沿恩我灰拡革閣割株干巻看簡危机揮貴疑吸供胸郷勤筋系敬警劇激穴券絹権憲源厳己呼誤后孝皇紅降鋼刻穀骨困砂座済裁策冊蚕至私姿視詞誌磁射捨尺若樹収宗就衆従縦縮熟純処署諸除承将傷障蒸針仁垂推寸盛聖誠舌宣専泉洗染銭善奏窓創装層操蔵臓存尊退宅担探誕段暖値宙忠著庁頂腸潮賃痛敵展討党糖届難乳認納脳派拝背肺俳班晩否批秘俵腹奮並陛閉片補暮宝訪亡忘棒枚幕密盟模訳郵優預幼欲翌乱卵覧裏律臨朗論", // レベル6: 小6 (191字)
+    "丈与且丘丙串丹丼乏乙乞乾亀了互亜享亭介仙仰企伎伏伐伯伴伸伺但佳併侍依侮侯侵侶促俊俗俸俺倒倣倫倹偉偏偵偶偽傍傑傘催傲債傾僅僕僚僧儀儒償充克免兼冒冗冠冥冶凄准凍凝凡凶凸凹刃刈刑到刹刺削剖剛剝剣剤剰劣励劾勃勅勘募勧勲勾匂匠匹匿升卑卓占即却卸厄厘又及双叔叙叫召吉吏吐吟含吹呂呈呉呪咲咽哀哲哺唄唆唇唐唯唾啓喉喚喝喩喪喫嗅嗣嘆嘱嘲噴嚇囚圏坊坑坪垣埋執培堀堅堆堕堤堪塀塁塊塑塔塗塚塞塡塾墜墨墳墾壁壇壊壌壮壱奉契奔奥奨奪奴如妃妄妊妖妙妥妨妬姓姫姻威娘娠娯婆婚婿媒嫁嫉嫌嫡嬢孔孤宛宜宰宴宵寂寛寝寡寧審寮寿封尉尋尚尻尼尽尾尿屈履屯岬岳峠峡峰崇崖崩嵐巡巧巨巾帆帝帥帽幅幣幻幽幾床庶庸廃廉廊廷弄弊弐弔弥弦弧弾彙彩彫彰影彼征徐御循微徴徹忍忙怒怖怠怨怪恋恐恒恣恥恨恭恵悔悟悠患悦悩悼惑惜惧惨惰愁愉愚慄慈慌慎慕慢慨慮慰慶憂憎憤憧憩憬憶憾懇懐懲懸戒戚戯戴戻房扇扉払扱扶抄把抑抗抜択披抱抵抹押抽拉拍拐拒拓拘拙拠括拭拳拶拷挑挟挨挫振挿捉捕捗捜据捻掃掌排掘掛措掲描揚換握援揺搬搭携搾摂摘摩摯撃撤撮撲擁擦擬攻敏敢敷斉斎斑斗斜斤斥斬施旋旦旨旬旺昆昇昧是普晶暁暇暦暫曇曖更曹曽替朕朱朴朽杉杯析枕枠枢枯架柄某柔柳柵柿栓核栽桁桃桑桟梗棄棋棚棟棺椅椎楷楼概槽欄欧欺款歓歳殉殊殖殴殻殿毀氾汁汎汗汚江汰沃沈沙没沢沸沼況泊泌泡泥泰洞津洪浄浜浦浪浮浸涙涯涼淑淡淫添渇渉渋渓渡渦湧湾湿溝溶溺滅滑滝滞滴漂漆漏漠漫漬漸潜潤潰澄濁濃濫濯瀬炉炊炎為烈焦煎煙煩煮燥爆爪爵爽牙牲犠狂狙狩狭猛猟猫献猶猿獄獣獲玄玩珍珠琴瑠璃璧環璽瓦瓶甘甚甲畏畔畜畝畳畿疎疫疲疾症痕痘痢痩痴瘍療癒癖皆盆盗監盤盲盾眉眠眺睡督睦瞬瞭瞳矛矯砕砲硝硫硬碁碑磨礁礎祉祥禅禍秀租秩称稚稲稼稽稿穂穏穫突窃窒窟窮窯竜端符筒箇箋箸範篤簿籍籠粋粒粗粘粛粧糧糾紋紛紡索紫累紳紹紺絞絡継維綱網綻緊緒締緩緯緻縁縛縫繁繊繕繭繰缶罰罵罷羅羞羨翁翻翼耐耗聴肌肖肘肝股肢肩肪肯胆胎胞胴脂脅脇脊脚脱腎腐腕腫腰腺膚膜膝膨膳臆臭致臼舗舞舟般舶舷艇艦艶芋芝芯芳苗苛茂茎荒荘菊菌菓華萎葛葬蓄蓋蔑蔽薄薦薪薫藍藤藩藻虎虐虚虜虞虹蚊蛇蛍蛮蜂蜜融衝衡衰衷袋袖被裂裕裸裾褐褒襟襲覆覇触訂訃託訟訴診詐詔詠詣詮詰該詳誇誉誓誘誰請諦諧諭諮諾謀謁謄謎謙謡謹譜譲豚豪貌貞貢販貪貫貼賂賄賊賓賜賠賢賦賭購贈赦赴超越趣距跡跳践踊踏踪蹴躍軒軟軸較載輝輩轄辛辣辱込迅迎迫迭逃透逐逓途逝逮逸遂遅遇遍違遜遡遣遭遮遵遷避還那邦邪邸郊郎郭酌酎酔酢酪酬酵酷醒醜醸采釈釜釣鈍鈴鉛鉢銃銘鋭鋳錠錦錬錮錯鍋鍛鍵鎌鎖鎮鐘鑑閑閥閲闇闘阻附陣陥陪陰陳陵陶隅隆随隔隙隠隣隷隻雄雅雇雌離雰零雷需震霊霜霧露靴韓韻響頃項須頑頒頓頰頻頼顎顕顧飽飾餅餌餓駄駆駐駒騎騒騰驚骸髄髪鬱魂魅魔鮮鯨鶏鶴麓麗麺麻黙鼓齢", // レベル7: 中学（追加分） (1101字)
+    "控" // レベル8: 高校（追加分） (1字)
+  ];
+
+  const KANJI_LEVEL = Object.create(null);
+  GRADE_KANJI_STRINGS.forEach((str, idx) => {
+    const level = idx + 1;
+    for (const ch of str) KANJI_LEVEL[ch] = level;
+  });
+
+  // 現在選択中の「既習レベル」。null = フィルタなし（すべてふりがなを付ける）
+  let knownLevel = null;
+
+  function getKanjiLevel(ch){
+    return Object.prototype.hasOwnProperty.call(KANJI_LEVEL, ch) ? KANJI_LEVEL[ch] : Infinity;
+  }
+
+  // 熟語（surface）中の漢字のうち、最も学年が遅い（＝未習に近い）ものの
+  // レベルを返す。漢字が1字も無い場合は0を返す。
+  function wordMaxKanjiLevel(surface){
+    let max = 0;
+    for (const ch of surface){
+      if (isKanji(ch)){
+        const lv = getKanjiLevel(ch);
+        if (lv > max) max = lv;
+      }
+    }
+    return max;
+  }
+
+  // 選択中の学年までに、surface を構成する漢字が「全部」習得済みなら true
+  function shouldHideFurigana(surface){
+    if (knownLevel === null) return false;
+    const maxLv = wordMaxKanjiLevel(surface);
+    return maxLv > 0 && maxLv <= knownLevel;
+  }
 
   function kataToHira(text){
     let out = "";
@@ -525,6 +627,11 @@
       const hasKanji = RE_KANJI.test(surface);
 
       if (!hasKanji){
+        result.push([surface, null]);
+        continue;
+      }
+
+      if (shouldHideFurigana(surface)){
         result.push([surface, null]);
         continue;
       }
@@ -685,6 +792,17 @@
   const docxProgressFill   = $("docx-progress-fill");
   const docxProgressLabel  = $("docx-progress-label");
   const docxLogEl          = $("docx-log");
+
+  /* ── 学年別漢字表示ボタン ─────────────────────────────── */
+  const gradeButtons = Array.prototype.slice.call(document.querySelectorAll(".grade-btn"));
+  gradeButtons.forEach(btn => {
+    btn.addEventListener("click", function(){
+      gradeButtons.forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const lv = btn.dataset.level;
+      knownLevel = lv === "" ? null : parseInt(lv, 10);
+    });
+  });
 
   function syncSliderLabels(){
     valFont.textContent   = "";
