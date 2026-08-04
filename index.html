@@ -436,7 +436,7 @@
           <option value="keep" selected>元のファイルの書式を維持し、ルビだけ追加する</option>
           <option value="settings">上の「設定」パネルの値（フォント名・本文サイズ）を適用する</option>
         </select>
-        <p class="grade-note" id="docx-mode-note" style="margin-top:6px;">「元のファイルの書式を維持」を選んだ場合、ふりがなの大きさは各箇所の本文サイズの約50%を自動計算します（上の「ルビの大きさ」スライダーはこのモードでは使用されません）。</p>
+        <p class="grade-note" id="docx-mode-note" style="margin-top:6px;">「元のファイルの書式を維持」を選んだ場合、ふりがなの大きさは各箇所の本文サイズの約40%を自動計算します（上の「ルビの大きさ」スライダーはこのモードでは使用されません）。</p>
       </div>
       <div class="field" style="margin-bottom:0;">
         <label>Word ファイル（.docx）を選択</label>
@@ -1026,8 +1026,8 @@
   }
 
   // ── 「元の書式を維持」モード用：本文サイズに対するふりがなサイズの自動計算 ──
-  // 本文11pt → ふりがな約5.5pt（四捨五入で5または6pt）を想定した比率
-  const RUBY_RATIO_KEEP = 0.5;
+  // 本文11pt → ふりがな約4.4pt（四捨五入で4pt）を想定した比率
+  const RUBY_RATIO_KEEP = 0.4;
   const RUBY_MIN_PT = 4; // 読みやすさを保つための下限
   function calcRubyPtFromBase(basePt){
     return Math.max(RUBY_MIN_PT, Math.round(basePt * RUBY_RATIO_KEEP));
