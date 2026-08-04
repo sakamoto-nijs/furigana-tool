@@ -436,7 +436,7 @@
           <option value="keep" selected>元のファイルの書式を維持し、ルビだけ追加する</option>
           <option value="settings">上の「設定」パネルの値（フォント名・本文サイズ）を適用する</option>
         </select>
-        <p class="grade-note" id="docx-mode-note" style="margin-top:6px;">「元のファイルの書式を維持」を選んだ場合、ふりがなの大きさは各箇所の本文サイズの約40%を自動計算します（上の「ルビの大きさ」スライダーはこのモードでは使用されません）。</p>
+        <p class="grade-note" id="docx-mode-note" style="margin-top:6px;">「元のファイルの書式を維持」を選んだ場合、ふりがなの大きさは各箇所の本文サイズの約40%を自動計算します（上の「ルビの大きさ」スライダーはこのモードでは使用されません）。本文との隙間は文字サイズより広め（本文サイズの約50%相当）に確保し、ふりがなが本文にひっつかないようにしています。</p>
       </div>
       <div class="field" style="margin-bottom:0;">
         <label>Word ファイル（.docx）を選択</label>
@@ -1033,15 +1033,27 @@
     return Math.max(RUBY_MIN_PT, Math.round(basePt * RUBY_RATIO_KEEP));
   }
 
+  // ふりがなを本文から浮かせる高さ（隙間）は、ふりがな自体の文字サイズとは
+  // 別の比率で計算する。同じ比率を使うと、ふりがなの文字サイズを縮小した際に
+  // 隙間まで一緒に縮んでしまい、ふりがなが本文にひっつく原因になるため。
+  const RUBY_GAP_RATIO_KEEP = 0.5;
+  function calcRubyRaisePtFromBase(basePt){
+    return Math.max(RUBY_MIN_PT, Math.round(basePt * RUBY_GAP_RATIO_KEEP));
+  }
+
 
   // ルビ側(rt)は常にmakeRpr()を使い、ベース側(本文)は呼び出し元が
   // 用意したrPrのXML文字列(元の書式 or 設定パネルの書式)をそのまま埋め込む。
-  function makeRubyElemCustomBase(surface, reading, baseRPrXml, rubyFont, rubyPt, offset, basePtForOffset){
+  // raisePt: ふりがなを浮かせる高さの計算に使う値。省略時はrubyPt(=ふりがなの
+  // 文字サイズ)をそのまま使う（従来通りの挙動）。文字サイズと隙間を別比率で
+  // 計算したい場合はここに別の値を渡す。
+  function makeRubyElemCustomBase(surface, reading, baseRPrXml, rubyFont, rubyPt, offset, basePtForOffset, raisePt){
+    const rp = (typeof raisePt === "number") ? raisePt : rubyPt;
     return `<w:ruby>`
       + `<w:rubyPr>`
       +   `<w:rubyAlign w:val="distributeLetter"/>`
       +   `<w:hps w:val="${rubyPt * 2}"/>`
-      +   `<w:hpsRaise w:val="${rubyPt * 2 + offset}"/>`
+      +   `<w:hpsRaise w:val="${rp * 2 + offset}"/>`
       +   `<w:hpsBaseText w:val="${basePtForOffset * 2}"/>`
       +   `<w:lid w:val="ja-JP"/>`
       + `</w:rubyPr>`
@@ -1117,24 +1129,26 @@
 
         const rPrNode = runNode.getElementsByTagName("w:rPr")[0] || null;
 
-        let baseRPrXml, basePtForOffset, rubyFont, effectiveRubyPt;
+        let baseRPrXml, basePtForOffset, rubyFont, effectiveRubyPt, effectiveRaisePt;
         if (mode === "settings"){
           baseRPrXml = makeRpr(font, bodyPt);
           basePtForOffset = bodyPt;
           rubyFont = font;
           effectiveRubyPt = rubyPt; // 設定パネルのスライダー値をそのまま使用
+          effectiveRaisePt = rubyPt; // 従来通り、文字サイズと同じ値で隙間を計算
         } else {
           baseRPrXml = rPrNode ? serializer.serializeToString(rPrNode) : "";
           basePtForOffset = getSzPtFromRPr(rPrNode) || 11;
           rubyFont = font;
-          effectiveRubyPt = calcRubyPtFromBase(basePtForOffset); // 本文サイズの50%を自動計算
+          effectiveRubyPt = calcRubyPtFromBase(basePtForOffset); // 本文サイズの40%を自動計算（文字サイズ）
+          effectiveRaisePt = calcRubyRaisePtFromBase(basePtForOffset); // 本文サイズの50%を自動計算（隙間・文字サイズより広めに確保）
         }
 
         let fragmentXml = "";
         for (const [surface, reading] of tokens){
           if (!surface) continue;
           fragmentXml += reading
-            ? makeRubyElemCustomBase(surface, reading, baseRPrXml, rubyFont, effectiveRubyPt, offset, basePtForOffset)
+            ? makeRubyElemCustomBase(surface, reading, baseRPrXml, rubyFont, effectiveRubyPt, offset, basePtForOffset, effectiveRaisePt)
             : makePlainRunCustomBase(surface, baseRPrXml);
         }
 
